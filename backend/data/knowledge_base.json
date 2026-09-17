@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ipcc-land-climate-001",
+    "title": "IPCC Special Report on Climate Change and Land",
+    "organization": "Intergovernmental Panel on Climate Change (IPCC)",
+    "topic": "land climate biodiversity sustainable land management",
+    "content": "The IPCC assesses interactions among land, climate, desertification, land degradation, food security and greenhouse gas fluxes. Its Summary for Policymakers states that land ecosystems and biodiversity are vulnerable to climate change and weather extremes, and that sustainable land management can contribute to reducing negative impacts of multiple stressors.",
+    "source_url": "https://www.ipcc.ch/srccl/"
+  },
+  {
+    "id": "ipcc-land-water-002",
+    "title": "IPCC Summary for Policymakers \u2014 Climate Change and Land",
+    "organization": "Intergovernmental Panel on Climate Change (IPCC)",
+    "topic": "water land use biodiversity ecosystem stress",
+    "content": "The IPCC describes land as part of exchanges of energy, water and aerosols between the land surface and atmosphere. It reports that land ecosystems and biodiversity are vulnerable to climate change and extremes, and discusses sustainable land management as a response to multiple stressors.",
+    "source_url": "https://www.ipcc.ch/srccl/chapter/summary-for-policymakers/"
+  },
+  {
+    "id": "unep-restoration-003",
+    "title": "Worldwide Land Degradation and Restoration Assessment Report: A Primer",
+    "organization": "UNEP / IPBES",
+    "topic": "land degradation restoration biodiversity ecosystem services",
+    "content": "This assessment material provides an evidence-based overview of land degradation and restoration, connecting land degradation with ecosystem condition and restoration responses.",
+    "source_url": "https://www.unep.org/resources/assessment/worldwide-land-degradation-and-restoration-assessment-report-primer"
+  },
+  {
+    "id": "unep-fao-restoration-004",
+    "title": "Principles for Ecosystem Restoration to Guide the UN Decade 2021\u20132030",
+    "organization": "UNEP / FAO",
+    "topic": "ecosystem restoration biodiversity local conditions",
+    "content": "The restoration principles describe ecosystem restoration as halting and reversing degradation, resulting in improved ecosystem services and recovered biodiversity. They emphasize that restoration practices vary with local conditions and societal choices.",
+    "source_url": "https://wedocs.unep.org/20.500.11822/40470"
+  },
+  {
+    "id": "fao-agris-homegarden-005",
+    "title": "Soil carbon stock in relation to plant diversity of homegardens in Kerala, India",
+    "organization": "FAO AGRIS record / Agroforestry Systems",
+    "topic": "soil organic carbon plant diversity agroforestry India",
+    "content": "A peer-reviewed study indexed in FAO AGRIS examined homegardens in Kerala and reported a relationship between soil carbon stock and plant diversity, including species richness and tree density. The study provides site-specific empirical evidence rather than a universal percentage improvement estimate.",
+    "source_url": "https://agris.fao.org/search/en/providers/122535/records/65df9ab96eef00c2cea32487"
+  },
+  {
+    "id": "fao-agris-western-ghats-006",
+    "title": "Depth-wise distribution of soil-carbon stock under shaded-perennial agroforestry systems in the Western Ghats of Karnataka, India",
+    "organization": "FAO AGRIS",
+    "topic": "soil carbon agroforestry land use Karnataka India",
+    "content": "This FAO AGRIS-indexed study compares soil organic carbon stocks under different land-use systems in the Western Ghats of Karnataka and reports that depth, aggregate size and treatment interacted significantly with soil carbon stocks. It supports considering land-use structure when reasoning about soil carbon, while local measurements remain necessary.",
+    "source_url": "https://agris.fao.org/search/en/providers/122535/records/65df03200f3e94b9e5d413dc"
+  }
+]
