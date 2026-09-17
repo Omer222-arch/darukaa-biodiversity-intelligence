@@ -4,90 +4,51 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 class EvidenceRetriever:
     """
-    Lightweight local RAG retriever.
+    Lightweight local RAG/vector retriever designed for small-memory deployment.
 
-    Retrieval is recommendation-aware rather than purely query-aware:
-    - semantic similarity captures meaning,
-    - lexical similarity captures exact terms,
-    - document.topic matching aligns evidence with environmental metrics,
-    - intent boosts prioritize sources whose title/topic/content matches the
-      intervention being recommended.
+    The previous implementation depended on sentence-transformers/PyTorch.
+    That pulled a very large CUDA-enabled torch stack into the Render image and
+    exceeded the 512 MiB service memory limit during application startup.
 
-    This reduces "technically related but wrong" evidence, e.g. a soil-carbon
-    paper being selected for a habitat-corridor recommendation.
+    This implementation uses scikit-learn TF-IDF vectors plus explicit
+    environmental-topic and intervention-anchor matching. It remains a real
+    local vector retrieval layer over the project's scientific knowledge base,
+    without requiring PyTorch or a remote vector database.
     """
-
-    # Explicit concepts used to connect recommendation language to the
-    # controlled vocabulary present in the local knowledge base.
-    CONCEPT_ALIASES = {
-        "restoration": {
-            "restore", "restoration", "degradation", "recover", "recovery",
-            "native vegetation", "habitat patch", "habitat patches",
-            "corridor", "corridors", "connectivity", "ecosystem restoration",
-        },
-        "biodiversity": {
-            "biodiversity", "species richness", "plant diversity",
-            "habitat diversity", "vegetation diversity", "species",
-        },
-        "soil_carbon": {
-            "soil carbon", "soil organic carbon", "organic carbon",
-            "organic matter", "carbon stock", "soc",
-        },
-        "water": {
-            "water", "rainfall", "soil moisture", "moisture", "infiltration",
-            "water retention", "water availability",
-        },
-        "land_use": {
-            "land use", "monoculture", "intercropping", "cover crop",
-            "cover crops", "agroforestry", "shaded perennial",
-        },
-        "land_degradation": {
-            "land degradation", "degradation", "land condition",
-            "ecosystem condition",
-        },
-    }
 
     def __init__(self):
         kb_path = Path(__file__).resolve().parents[1] / "data" / "knowledge_base.json"
-
         with open(kb_path, "r", encoding="utf-8") as f:
             self.documents = json.load(f)
 
-        self._embeddings = None
-        self._model = None
+        self._texts = [self._document_text(d) for d in self.documents]
 
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-            texts = [self._document_text(d) for d in self.documents]
-            self._embeddings = self._model.encode(
-                texts,
-                normalize_embeddings=True,
-            )
-        except Exception:
-            # Deterministic lexical/topic retrieval remains available if the
-            # embedding dependency/model cannot be loaded.
-            self._model = None
-            self._embeddings = None
+        # Small local vector index. No model download and no torch dependency.
+        self._vectorizer = TfidfVectorizer(
+            lowercase=True,
+            ngram_range=(1, 2),
+            sublinear_tf=True,
+            min_df=1,
+        )
+        self._matrix = self._vectorizer.fit_transform(self._texts)
 
     @staticmethod
     def _document_text(document: Dict[str, Any]) -> str:
-        return " ".join(
-            [
-                document.get("title", ""),
-                document.get("organization", ""),
-                document.get("topic", ""),
-                document.get("content", ""),
-                " ".join(document.get("tags", [])),
-            ]
-        ).lower()
+        title = document.get("title", "")
+        organization = document.get("organization", "")
+        topic = document.get("topic", "")
+        content = document.get("content", "")
+        tags = " ".join(document.get("tags", []))
+        return " ".join([title, organization, topic, content, tags]).lower()
 
     @staticmethod
-    def _tokens(text: str) -> set[str]:
+    def _tokens(text: str) -> set:
         return {
             token
             for token in re.findall(r"[a-z0-9]+", text.lower())
@@ -97,136 +58,91 @@ class EvidenceRetriever:
     def _lexical_score(self, query: str, document: Dict[str, Any]) -> float:
         q = self._tokens(query)
         d = self._tokens(self._document_text(document))
-
         if not q or not d:
             return 0.0
-
-        intersection = len(q & d)
-        return intersection / math.sqrt(len(q) * len(d))
-
-    def _field_lexical_score(self, query: str, value: str) -> float:
-        q = self._tokens(query)
-        d = self._tokens(value)
-
-        if not q or not d:
-            return 0.0
-
         return len(q & d) / math.sqrt(len(q) * len(d))
 
-    def _semantic_scores(self, query: str) -> List[float]:
-        if self._model is None or self._embeddings is None:
-            return [0.0] * len(self.documents)
+    def _vector_scores(self, query: str) -> List[float]:
+        vector = self._vectorizer.transform([query])
+        scores = cosine_similarity(vector, self._matrix)[0]
+        return [float(x) for x in scores]
 
-        vector = self._model.encode(
-            [query],
-            normalize_embeddings=True,
-        )[0]
-
-        return [float(vector @ embedding) for embedding in self._embeddings]
-
-    def _concept_score(
-        self,
-        query: str,
-        recommendation: Dict[str, Any] | None = None,
-    ) -> float:
-        """
-        Score how strongly the retrieval request expresses a controlled
-        environmental concept.
-
-        The returned value is intentionally bounded to [0, 1].
-        """
-        text = query.lower()
-        if recommendation:
-            text += " " + recommendation.get("action", "").lower()
-            text += " " + recommendation.get("why", "").lower()
-            text += " " + " ".join(recommendation.get("metrics", [])).lower()
-            text += " " + " ".join(recommendation.get("reasoning_chain", [])).lower()
-
-        matched = 0
-        possible = 0
-
-        for aliases in self.CONCEPT_ALIASES.values():
-            # A concept counts once even when several aliases occur.
-            possible += 1
-            if any(alias in text for alias in aliases):
-                matched += 1
-
-        return matched / possible if possible else 0.0
-
-    def _intent_boost(
-        self,
-        recommendation: Dict[str, Any],
-        document: Dict[str, Any],
-    ) -> float:
-        """
-        Targeted boost for recommendation-to-document alignment.
-
-        The boost is based on the recommendation's actual intervention and
-        metrics, with document title/topic receiving more weight than generic
-        document content.
-        """
-        action = recommendation.get("action", "")
-        why = recommendation.get("why", "")
-        metrics = " ".join(recommendation.get("metrics", []))
-        chain = " ".join(recommendation.get("reasoning_chain", []))
-
-        request = " ".join([action, why, metrics, chain]).lower()
-
-        title = document.get("title", "")
-        topic = document.get("topic", "")
-        content = document.get("content", "")
-
-        title_score = self._field_lexical_score(request, title)
-        topic_score = self._field_lexical_score(request, topic)
-        content_score = self._field_lexical_score(request, content)
-
-        # Topic/title are deliberately stronger: generic documents often
-        # mention biodiversity or soil in passing.
-        return (
-            0.45 * title_score
-            + 0.40 * topic_score
-            + 0.15 * content_score
-        )
-
-    def _recommendation_intent_terms(
-        self,
-        recommendation: Dict[str, Any],
-    ) -> set[str]:
-        """Return high-value environmental concepts expressed by the action."""
-        text = " ".join(
-            [
-                recommendation.get("action", ""),
-                recommendation.get("why_it_works", recommendation.get("why", "")),
-                " ".join(recommendation.get("impacted_metrics", recommendation.get("metrics", []))),
-                " ".join(recommendation.get("reasoning_chain", [])),
-            ]
-        ).lower()
-
-        return {
-            concept
-            for concept, aliases in self.CONCEPT_ALIASES.items()
-            if any(alias in text for alias in aliases)
+    @staticmethod
+    def _concept_tokens(text: str) -> set:
+        text = text.lower()
+        concepts = {
+            "soil organic carbon": {"soil", "carbon", "organic", "soc"},
+            "soil moisture": {"soil", "moisture", "water", "infiltration", "retention"},
+            "habitat diversity": {"habitat", "diversity", "biodiversity"},
+            "species richness": {"species", "richness", "biodiversity"},
+            "vegetation diversity": {"vegetation", "diversity", "plant"},
+            "land-cover connectivity": {"land", "cover", "connectivity", "corridor", "fragmentation"},
+            "restoration": {"restoration", "restore", "degradation", "ecosystem"},
+            "agroforestry": {"agroforestry", "trees", "perennial", "land-use"},
+            "water": {"water", "rainfall", "moisture", "infiltration"},
+            "climate": {"climate", "temperature", "rainfall", "extremes"},
+            "land use": {"land", "use", "land-use", "agriculture"},
         }
 
-    def _concept_alignment(
+        active = set()
+        for label, words in concepts.items():
+            if any(word in text for word in words):
+                active.add(label)
+        return active
+
+    def _topic_alignment(
+        self,
+        query: str,
+        topics: List[str],
+        document: Dict[str, Any],
+    ) -> float:
+        requested = self._concept_tokens(" ".join([query] + topics))
+        if not requested:
+            return 0.0
+
+        document_concepts = self._concept_tokens(
+            " ".join(
+                [
+                    document.get("title", ""),
+                    document.get("topic", ""),
+                    document.get("content", ""),
+                ]
+            )
+        )
+        if not document_concepts:
+            return 0.0
+
+        return len(requested & document_concepts) / len(requested)
+
+    def _intervention_alignment(
         self,
         recommendation: Dict[str, Any],
         document: Dict[str, Any],
     ) -> float:
-        """Match recommendation concepts against document topic/title/content."""
-        concepts = self._recommendation_intent_terms(recommendation)
-        if not concepts:
+        action = recommendation.get("action", "").lower()
+        document_text = self._document_text(document)
+
+        anchors = {
+            "restore": ["restoration", "restore", "degradation", "ecosystem"],
+            "corridor": ["corridor", "connectivity", "habitat", "fragmentation"],
+            "habitat": ["habitat", "biodiversity", "species", "restoration"],
+            "agroforestry": ["agroforestry", "trees", "perennial"],
+            "intercropping": ["intercropping", "plant diversity", "crop"],
+            "cover crops": ["cover", "vegetation", "soil"],
+            "soil cover": ["soil", "cover", "organic", "carbon"],
+            "water-retention": ["water", "moisture", "infiltration", "rainfall"],
+            "water retention": ["water", "moisture", "infiltration", "rainfall"],
+        }
+
+        matched = []
+        for anchor, terms in anchors.items():
+            if anchor in action:
+                matched.extend(term for term in terms if term in document_text)
+
+        if not matched:
             return 0.0
 
-        doc_text = self._document_text(document)
-        matched = 0
-
-        for concept in concepts:
-            aliases = self.CONCEPT_ALIASES[concept]
-            if any(alias in doc_text for alias in aliases):
-                matched += 1
-
-        return matched / len(concepts)
+        return min(1.0, len(set(matched)) / 4.0)
 
     def search(
         self,
@@ -234,45 +150,30 @@ class EvidenceRetriever:
         top_k: int = 5,
         topics: List[str] | None = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Global evidence retrieval.
-
-        `topics` can contain recommendation-specific concepts such as:
-        plant diversity, soil carbon, restoration, habitat connectivity, etc.
-        """
         topics = topics or []
         combined_query = " ".join([query] + topics).strip()
 
-        semantic_scores = self._semantic_scores(combined_query)
+        vector_scores = self._vector_scores(combined_query)
         scored = []
 
         for i, document in enumerate(self.documents):
+            vector = vector_scores[i]
             lexical = self._lexical_score(combined_query, document)
-            semantic = semantic_scores[i]
+            topic = self._topic_alignment(combined_query, topics, document)
 
-            # Generic/global retrieval. The document.topic field is explicitly
-            # included in _document_text(), so topic terms influence lexical
-            # retrieval even when embeddings are unavailable.
-            topic_lexical = self._field_lexical_score(
-                " ".join(topics),
-                document.get("topic", ""),
-            ) if topics else 0.0
-
+            # Vector retrieval is the main signal; lexical/topic alignment makes
+            # the small knowledge base more precise for environmental concepts.
             score = (
-                0.60 * semantic
-                + 0.25 * lexical
-                + 0.15 * topic_lexical
+                0.55 * vector
+                + 0.20 * lexical
+                + 0.25 * topic
             )
-
             scored.append((score, document))
 
-        scored.sort(key=lambda x: x[0], reverse=True)
+        scored.sort(key=lambda item: item[0], reverse=True)
 
         return [
-            {
-                **document,
-                "relevance": round(float(score), 4),
-            }
+            {**document, "relevance": round(float(score), 4)}
             for score, document in scored[:top_k]
         ]
 
@@ -282,97 +183,44 @@ class EvidenceRetriever:
         environmental_context: Dict[str, Any],
         top_k: int = 2,
     ) -> List[Dict[str, Any]]:
-        """
-        Recommendation-aware RAG.
-
-        Retrieval is deliberately conditioned on the intervention rather than
-        only the environmental state. This means a habitat-restoration action
-        preferentially retrieves restoration/biodiversity evidence, while a
-        soil-carbon action preferentially retrieves soil-carbon studies.
-        """
-        query_parts = [
-            recommendation.get("action", ""),
-            recommendation.get("why_it_works", recommendation.get("why", "")),
-            " ".join(recommendation.get("impacted_metrics", recommendation.get("metrics", []))),
-            " ".join(recommendation.get("reasoning_chain", [])),
-            environmental_context.get("region", ""),
-            environmental_context.get("crop", ""),
-            environmental_context.get("land_use", ""),
-            environmental_context.get("rainfall", ""),
-            environmental_context.get("habitat_diversity", ""),
-            environmental_context.get("deforestation", ""),
-            environmental_context.get("pollution", ""),
-        ]
-
-        query = " ".join(str(x) for x in query_parts if x).strip()
-
-        # Metrics remain useful retrieval topics, but the action itself is
-        # retained in the semantic and intent scoring.
-        topics = list(
-            recommendation.get(
-                "impacted_metrics",
-                recommendation.get("metrics", []),
-            )
+        action = recommendation.get("action", "")
+        why = recommendation.get("why_it_works", "")
+        metrics = " ".join(recommendation.get("impacted_metrics", []))
+        reasoning_chain = " ".join(
+            recommendation.get("reasoning_chain", [])
         )
 
-        semantic_scores = self._semantic_scores(query)
-        scored = []
+        context_parts = [
+            str(environmental_context.get("region", "")),
+            str(environmental_context.get("crop", "")),
+            str(environmental_context.get("land_use", "")),
+            str(environmental_context.get("rainfall", "")),
+            str(environmental_context.get("habitat_diversity", "")),
+            str(environmental_context.get("deforestation", "")),
+            str(environmental_context.get("pollution", "")),
+        ]
 
-        for i, document in enumerate(self.documents):
-            lexical = self._lexical_score(query, document)
-            semantic = semantic_scores[i]
+        query = " ".join(
+            [action, why, metrics, reasoning_chain] + context_parts
+        ).strip()
 
-            topic_score = self._field_lexical_score(
-                " ".join(topics),
-                document.get("topic", ""),
-            )
+        topics = list(recommendation.get("impacted_metrics", []))
 
-            intent_score = self._intent_boost(recommendation, document)
-            concept_alignment = self._concept_alignment(recommendation, document)
+        results = self.search(query, top_k=max(top_k * 3, 5), topics=topics)
 
-            # High-value intervention anchors. These are stronger than broad
-            # metric matches because they represent what the system actually
-            # told the user to do.
-            action_text = recommendation.get("action", "").lower()
-            doc_anchor_text = " ".join([
-                document.get("title", ""),
-                document.get("topic", ""),
-            ]).lower()
-            restoration_anchor = (
-                1.0
-                if any(term in action_text for term in ["restore", "restoration", "habitat corridor", "habitat patch"])
-                and any(term in doc_anchor_text for term in ["restoration", "restoration assessment"])
-                else 0.0
-            )
+        # Apply a recommendation-specific intervention boost after vector
+        # retrieval so a generic biodiversity document cannot outrank a
+        # document directly about the proposed intervention.
+        rescored = []
+        for document in results:
+            base = float(document.get("relevance", 0.0))
+            intervention = self._intervention_alignment(recommendation, document)
+            score = 0.75 * base + 0.25 * intervention
+            rescored.append((score, document))
 
-            # Main RAG score:
-            # 35% semantic meaning
-            # 10% exact lexical overlap
-            # 10% metric/topic alignment
-            # 15% recommendation title/topic alignment
-            # 30% controlled environmental-concept alignment
-            # + targeted intervention anchor bonus
-            #
-            # The final term is deliberately strong: it prevents a document
-            # from winning merely because it mentions a shared metric such as
-            # "biodiversity" when its actual evidence is about another action.
-            score = (
-                0.35 * semantic
-                + 0.10 * lexical
-                + 0.10 * topic_score
-                + 0.15 * intent_score
-                + 0.30 * concept_alignment
-                + 0.10 * restoration_anchor
-            )
-
-            scored.append((score, document))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
+        rescored.sort(key=lambda item: item[0], reverse=True)
 
         return [
-            {
-                **document,
-                "relevance": round(float(score), 4),
-            }
-            for score, document in scored[:top_k]
+            {**document, "relevance": round(float(score), 4)}
+            for score, document in rescored[:top_k]
         ]
