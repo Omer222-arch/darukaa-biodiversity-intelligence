@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -16,86 +16,162 @@ const example = {
   deforestation: "high"
 };
 
-const labels = {
-  soil_carbon_signal: "Soil carbon",
-  soil_carbon_value: "SOC",
-  water_signal: "Rainfall",
-  land_use_signal: "Land use",
-  habitat_pressure: "Habitat pressure",
-  habitat_diversity: "Habitat diversity"
-};
+/* =========================================================
+   HELPERS
+   ========================================================= */
 
 function prettyKey(key) {
-  return labels[key] || key.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
+  return key
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 function severity(value) {
-  const v = String(value).toLowerCase();
-  if (v.includes("low") || v.includes("high") || v.includes("0.3") || v.includes("pressure")) return "alert";
-  if (v.includes("moderate") || v.includes("screening")) return "watch";
-  return "normal";
+  const text = String(value || "").toLowerCase();
+
+  if (
+    text.includes("high") ||
+    text.includes("low-screening") ||
+    text.includes("severe")
+  ) {
+    return "alert";
+  }
+
+  if (
+    text.includes("moderate") ||
+    text.includes("medium") ||
+    text.includes("watch")
+  ) {
+    return "watch";
+  }
+
+  return "";
 }
 
-function EnvironmentalState({ state }) {
+function uniqueEvidence(items = []) {
+  const seen = new Set();
+
+  return items.filter(item => {
+    const key = item?.source_url || item?.title;
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+/* =========================================================
+   ENVIRONMENTAL SIGNALS
+   ========================================================= */
+
+function MetricState({ state }) {
   const entries = Object.entries(state || {});
+
+  if (!entries.length) return null;
+
   return (
-    <section className="state-section">
-      <div className="section-heading">
-        <div>
-          <div className="section-kicker">01 · ENVIRONMENTAL STATE</div>
-          <h2>What Darukaa sees</h2>
+    <div className="state-grid">
+      {entries.map(([key, value]) => (
+        <div
+          className={`state-card ${severity(value)}`}
+          key={key}
+        >
+          <span className="state-label">
+            {prettyKey(key)}
+          </span>
+
+          <strong>{String(value)}</strong>
         </div>
-        <span className="live-badge"><i /> LIVE ANALYSIS</span>
-      </div>
-      <div className="state-grid">
-        {entries.map(([key, value]) => (
-          <div className={`metric-card ${severity(value)}`} key={key}>
-            <div className="metric-top">
-              <span>{prettyKey(key)}</span>
-              <span className="metric-dot" />
-            </div>
-            <strong>{String(value)}</strong>
-            <small>{key === "soil_carbon_value" ? "measured input" : "detected signal"}</small>
-          </div>
-        ))}
-      </div>
-    </section>
+      ))}
+    </div>
   );
 }
 
+/* =========================================================
+   INTERACTION GRAPH
+   ========================================================= */
+
 function InteractionGraph({ graph }) {
   if (!graph?.length) return null;
+
   return (
-    <section>
+    <section className="analysis-section">
+      <div className="section-kicker">
+        REASONING ENGINE
+      </div>
+
       <div className="section-heading">
         <div>
-          <div className="section-kicker">02 · MULTI-METRIC REASONING</div>
-          <h2>Environmental interaction graph</h2>
-          <p className="section-note">Signals are connected before an intervention is selected.</p>
+          <h3>Environmental interaction graph</h3>
+
+          <p className="section-note">
+            Multiple environmental signals are connected before
+            selecting an intervention.
+          </p>
         </div>
-        <span className="graph-badge">{graph.length} pathways</span>
+
+        <span className="section-count">
+          {graph.length} pathways
+        </span>
       </div>
-      <div className="graph-grid">
+
+      <div className="interaction-list">
         {graph.map((node, i) => (
-          <article className="graph-card" key={i}>
-            <div className="graph-number">0{i + 1}</div>
-            <div className="graph-block">
-              <span className="node-label">SIGNALS</span>
-              <div className="signal-row">{node.signals.map(signal => <span className="signal" key={signal}>{signal}</span>)}</div>
+          <article className="interaction" key={i}>
+
+            <div className="interaction-step">
+              <span className="node-label">
+                SIGNALS
+              </span>
+
+              <div className="signal-row">
+                {(node.signals || []).map(signal => (
+                  <span className="signal" key={signal}>
+                    {signal}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="graph-arrow">↓</div>
-            <div className="graph-block relationship">
-              <span className="node-label">RELATIONSHIP</span>
-              <p>{node.relationship}</p>
+
+            <div className="arrow">
+              ↓
             </div>
-            <div className="graph-arrow">↓</div>
-            <div className="graph-block intervention-node">
-              <span className="node-label">INTERVENTION</span>
-              <p>{node.intervention}</p>
+
+            <div className="interaction-step">
+              <span className="node-label">
+                RELATIONSHIP
+              </span>
+
+              <p>
+                {node.relationship}
+              </p>
             </div>
+
+            <div className="arrow">
+              ↓
+            </div>
+
+            <div className="interaction-step intervention-node">
+              <span className="node-label">
+                INTERVENTION
+              </span>
+
+              <p>
+                {node.intervention}
+              </p>
+            </div>
+
             <div className="metric-output">
-              {node.metrics.map(metric => <span key={metric}>↗ {metric}</span>)}
+              {(node.metrics || []).map(metric => (
+                <span key={metric}>
+                  {metric}
+                </span>
+              ))}
             </div>
+
           </article>
         ))}
       </div>
@@ -103,206 +179,1219 @@ function InteractionGraph({ graph }) {
   );
 }
 
-function ReasoningTrace({ trace }) {
-  if (!trace?.length) return null;
-  return (
-    <section className="trace-section">
-      <div className="section-kicker">03 · DECISION TRACE</div>
-      <h2>How the system reasoned</h2>
-      <div className="trace-timeline">
-        {trace.map((item, i) => (
-          <div className="trace-item" key={i}>
-            <div className="trace-marker">{String(i + 1).padStart(2, "0")}</div>
-            <p>{item}</p>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
+/* =========================================================
+   CONVERSATIONAL ANALYSIS CARD
+   ========================================================= */
 
-function EvidenceCard({ evidence }) {
-  return (
-    <a className="evidence-card" href={evidence.source_url} target="_blank" rel="noreferrer">
-      <div className="evidence-icon">↗</div>
-      <div>
-        <small>{evidence.organization}</small>
-        <strong>{evidence.title}</strong>
-        <span>View scientific source</span>
-      </div>
-    </a>
-  );
-}
+function ChatAnalysis({ analysis }) {
+  if (!analysis || analysis.needs_clarification) {
+    return null;
+  }
 
-function Recommendation({ recommendation, index }) {
+  const stateEntries = Object.entries(
+    analysis.environmental_state || {}
+  );
+
+  const recommendations =
+    analysis.recommendations || [];
+
+  const graph =
+    analysis.interaction_graph || [];
+
+  const evidence = uniqueEvidence(
+    recommendations.flatMap(
+      recommendation => recommendation.evidence || []
+    )
+  ).slice(0, 5);
+
   return (
-    <article className="recommendation">
-      <div className="rec-head">
-        <div className="rec-index">0{index + 1}</div>
+    <div className="chat-analysis">
+
+      {/* SUMMARY */}
+
+      <div className="chat-assessment">
+        <div className="assessment-icon">
+          ◈
+        </div>
+
         <div>
-          <span className="section-kicker">ACTION {index + 1}</span>
-          <h3>{recommendation.action}</h3>
+          <div className="chat-analysis-label">
+            GROUNDED ENVIRONMENTAL ASSESSMENT
+          </div>
+
+          <p>
+            {analysis.summary}
+          </p>
         </div>
       </div>
-      <p className="rec-why">{recommendation.why_it_works}</p>
 
-      <div className="reasoning-chain">
-        <div className="chain-label">REASONING CHAIN</div>
-        {recommendation.reasoning_chain?.map((step, j) => (
-          <div className="chain-step" key={j}>
-            <span>{j + 1}</span><p>{step}</p>
+      {/* SIGNALS */}
+
+      {stateEntries.length > 0 && (
+        <div className="chat-analysis-section">
+
+          <div className="chat-analysis-title">
+            ENVIRONMENTAL SIGNALS
           </div>
-        ))}
+
+          <div className="chat-signal-grid">
+            {stateEntries.map(([key, value]) => (
+              <div
+                className={`chat-signal ${severity(value)}`}
+                key={key}
+              >
+                <span>
+                  {prettyKey(key)}
+                </span>
+
+                <strong>
+                  {String(value)}
+                </strong>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      )}
+
+      {/* INTERACTION PATHWAYS */}
+
+      {graph.length > 0 && (
+        <div className="chat-analysis-section">
+
+          <div className="chat-analysis-title-row">
+            <div className="chat-analysis-title">
+              MULTI-METRIC REASONING
+            </div>
+
+            <span className="mini-count">
+              {graph.length} pathways
+            </span>
+          </div>
+
+          <div className="chat-pathways">
+
+            {graph.slice(0, 3).map((node, i) => (
+              <div
+                className="chat-pathway"
+                key={i}
+              >
+
+                <div className="pathway-top">
+                  {(node.signals || []).map(signal => (
+                    <span
+                      className="pathway-signal"
+                      key={signal}
+                    >
+                      {signal}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="pathway-arrow">
+                  ↓
+                </div>
+
+                <p>
+                  {node.relationship}
+                </p>
+
+                <div className="pathway-arrow">
+                  ↓
+                </div>
+
+                <strong>
+                  {node.intervention}
+                </strong>
+
+                <div className="pathway-metrics">
+                  {(node.metrics || []).map(metric => (
+                    <span key={metric}>
+                      {metric}
+                    </span>
+                  ))}
+                </div>
+
+              </div>
+            ))}
+
+          </div>
+        </div>
+      )}
+
+      {/* RECOMMENDATIONS */}
+
+      {recommendations.length > 0 && (
+        <div className="chat-analysis-section">
+
+          <div className="chat-analysis-title-row">
+            <div className="chat-analysis-title">
+              RECOMMENDED ACTIONS
+            </div>
+
+            <span className="mini-count">
+              {recommendations.length}
+            </span>
+          </div>
+
+          <div className="chat-recommendations">
+
+            {recommendations.map(
+              (recommendation, index) => (
+                <article
+                  className="chat-recommendation"
+                  key={index}
+                >
+
+                  <div className="chat-rec-number">
+                    {String(index + 1).padStart(2, "0")}
+                  </div>
+
+                  <div className="chat-rec-content">
+
+                    <h4>
+                      {recommendation.action}
+                    </h4>
+
+                    <p>
+                      {recommendation.why_it_works}
+                    </p>
+
+                    <div className="chat-rec-metrics">
+                      {(
+                        recommendation.impacted_metrics ||
+                        []
+                      ).map(metric => (
+                        <span key={metric}>
+                          {metric}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="chat-rec-meta">
+
+                      <span>
+                        <b>TIME</b>
+                        {recommendation.time_horizon}
+                      </span>
+
+                      <span>
+                        <b>CONFIDENCE</b>
+                        {recommendation.confidence}
+                      </span>
+
+                    </div>
+
+                  </div>
+
+                </article>
+              )
+            )}
+
+          </div>
+        </div>
+      )}
+
+      {/* SCIENTIFIC EVIDENCE */}
+
+      {evidence.length > 0 && (
+        <div className="chat-analysis-section">
+
+          <div className="chat-analysis-title">
+            SCIENTIFIC EVIDENCE
+          </div>
+
+          <div className="chat-evidence-list">
+
+            {evidence.map(item => (
+              <a
+                className="chat-evidence"
+                href={item.source_url}
+                target="_blank"
+                rel="noreferrer"
+                key={item.source_url}
+              >
+
+                <div className="evidence-mark">
+                  ↗
+                </div>
+
+                <div className="evidence-copy">
+
+                  <small>
+                    {item.organization}
+                  </small>
+
+                  <strong>
+                    {item.title}
+                  </strong>
+
+                </div>
+
+              </a>
+            ))}
+
+          </div>
+        </div>
+      )}
+
+      <div className="chat-analysis-footer">
+        <span>RAG GROUNDED</span>
+        <span>•</span>
+        <span>MULTI-METRIC REASONING</span>
+        <span>•</span>
+        <span>SCIENTIFIC EVIDENCE</span>
       </div>
 
-      <div className="rec-meta">
-        <div><span>IMPACTED METRICS</span><div className="chips">{recommendation.impacted_metrics.map(m => <b key={m}>{m}</b>)}</div></div>
-        <div className="meta-pair"><span>TIME HORIZON</span><strong>{recommendation.time_horizon}</strong></div>
-        <div className="meta-pair"><span>CONFIDENCE</span><strong>{recommendation.confidence}</strong></div>
-      </div>
-
-      <div className="evidence-wrap">
-        <div className="evidence-title"><span>SCIENTIFIC EVIDENCE</span><em>{recommendation.evidence?.length || 0} sources</em></div>
-        <div className="evidence-grid">{recommendation.evidence?.map(e => <EvidenceCard evidence={e} key={e.source_url} />)}</div>
-      </div>
-    </article>
+    </div>
   );
 }
 
+/* =========================================================
+   FULL ANALYSIS PANEL
+   ========================================================= */
+
 function Analysis({ result }) {
-  if (!result) return (
-    <div className="empty-state">
-      <div className="empty-orbit"><span>◌</span></div>
-      <div className="section-kicker">DARUKAA ENGINE READY</div>
-      <h2>Turn environmental signals into evidence-backed action.</h2>
-      <p>Start with a natural-language question or structured ecosystem data.</p>
-      <div className="empty-flow"><span>signals</span><b>→</b><span>reasoning</span><b>→</b><span>evidence</span><b>→</b><span>action</span></div>
-    </div>
-  );
+  if (!result) return null;
 
   if (result.needs_clarification) {
     return (
-      <div className="clarification-panel">
-        <div className="status-pill">CONTEXT NEEDED</div>
-        <h2>{result.summary}</h2>
-        <p className="clarify-intro">A site-specific recommendation needs a little more environmental context.</p>
-        <div className="question-list">{result.clarification_questions.map((q, i) => <div key={q}><span>{i + 1}</span>{q}</div>)}</div>
+      <div className="clarify-box">
+
+        <div className="status">
+          CONTEXT NEEDED
+        </div>
+
+        <h2>
+          {result.summary}
+        </h2>
+
+        <div className="clarification-list">
+          {(result.clarification_questions || []).map(
+            (question, index) => (
+              <div
+                className="clarification-item"
+                key={question}
+              >
+                <span>
+                  0{index + 1}
+                </span>
+
+                <p>
+                  {question}
+                </p>
+              </div>
+            )
+          )}
+        </div>
+
       </div>
     );
   }
 
   return (
-    <div className="analysis-content">
-      <div className="analysis-hero">
+    <>
+      <div className="analysis-top">
+
         <div>
-          <span className="status-pill grounded">● GROUNDED ANALYSIS</span>
-          <h1>Environmental intelligence report</h1>
-          <p>{result.summary}</p>
+          <div className="status">
+            GROUNDED ANALYSIS
+          </div>
+
+          <h2>
+            {result.summary}
+          </h2>
         </div>
-        <div className="score-orbit"><div><strong>{result.recommendations?.length || 0}</strong><span>actions</span></div></div>
+
+        <div className="analysis-status-dot">
+          <span></span>
+          LIVE
+        </div>
+
       </div>
 
-      <EnvironmentalState state={result.environmental_state} />
-      <InteractionGraph graph={result.interaction_graph} />
-      <ReasoningTrace trace={result.reasoning_trace} />
+      <div className="analysis-block">
 
-      <section>
-        <div className="section-heading">
-          <div><div className="section-kicker">04 · RECOMMENDATIONS</div><h2>Evidence-backed actions</h2></div>
-          <span className="graph-badge">Actionable</span>
+        <div className="section-kicker">
+          ENVIRONMENTAL STATE
         </div>
-        {result.recommendations?.map((r, i) => <Recommendation recommendation={r} index={i} key={i} />)}
+
+        <MetricState
+          state={result.environmental_state}
+        />
+
+      </div>
+
+      <InteractionGraph
+        graph={result.interaction_graph}
+      />
+
+      {result.reasoning_trace?.length > 0 && (
+        <section className="analysis-section">
+
+          <div className="section-kicker">
+            DECISION TRACE
+          </div>
+
+          <div className="section-heading">
+            <div>
+              <h3>
+                Reasoning trace
+              </h3>
+
+              <p className="section-note">
+                How the environmental signals were
+                transformed into intervention pathways.
+              </p>
+            </div>
+
+            <span className="section-count">
+              {result.reasoning_trace.length} steps
+            </span>
+          </div>
+
+          <div className="trace-card">
+
+            {result.reasoning_trace.map(
+              (step, index) => (
+                <div
+                  className="trace-row"
+                  key={index}
+                >
+                  <span className="trace-number">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+
+                  <p>
+                    {step}
+                  </p>
+                </div>
+              )
+            )}
+
+          </div>
+
+        </section>
+      )}
+
+      <section className="analysis-section">
+
+        <div className="section-kicker">
+          ACTIONS
+        </div>
+
+        <div className="section-heading">
+          <div>
+            <h3>
+              Evidence-backed recommendations
+            </h3>
+
+            <p className="section-note">
+              Each action is connected to impacted
+              environmental metrics and retrieved evidence.
+            </p>
+          </div>
+
+          <span className="section-count">
+            {result.recommendations?.length || 0} actions
+          </span>
+        </div>
+
+        <div className="recommendations">
+
+          {(result.recommendations || []).map(
+            (recommendation, index) => (
+              <article
+                className="recommendation"
+                key={index}
+              >
+
+                <div className="recommendation-header">
+
+                  <div className="rec-number">
+                    {String(index + 1).padStart(2, "0")}
+                  </div>
+
+                  <div>
+                    <div className="rec-title">
+                      RECOMMENDATION
+                    </div>
+
+                    <h3>
+                      {recommendation.action}
+                    </h3>
+                  </div>
+
+                </div>
+
+                <div className="rec-body">
+
+                  <p>
+                    {recommendation.why_it_works}
+                  </p>
+
+                  {recommendation.reasoning_chain?.length >
+                    0 && (
+                    <div className="reasoning-chain">
+
+                      <div className="chain-heading">
+                        LOGIC CHAIN
+                      </div>
+
+                      {recommendation.reasoning_chain.map(
+                        (step, j) => (
+                          <div
+                            className="chain-step"
+                            key={j}
+                          >
+                            <span>
+                              {j + 1}
+                            </span>
+
+                            <p>
+                              {step}
+                            </p>
+                          </div>
+                        )
+                      )}
+
+                    </div>
+                  )}
+
+                  <div className="chips">
+
+                    {(
+                      recommendation.impacted_metrics ||
+                      []
+                    ).map(metric => (
+                      <span key={metric}>
+                        {metric}
+                      </span>
+                    ))}
+
+                  </div>
+
+                  <div className="rec-details">
+
+                    <div>
+                      <span>
+                        TIME HORIZON
+                      </span>
+
+                      <strong>
+                        {recommendation.time_horizon}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span>
+                        CONFIDENCE
+                      </span>
+
+                      <strong>
+                        {recommendation.confidence}
+                      </strong>
+                    </div>
+
+                  </div>
+
+                  {recommendation.evidence?.length > 0 && (
+                    <details>
+
+                      <summary>
+                        View supporting evidence
+                      </summary>
+
+                      <div className="evidence">
+
+                        {recommendation.evidence.map(
+                          evidence => (
+                            <a
+                              href={evidence.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              key={evidence.source_url}
+                            >
+                              <span>↗</span>
+                              <div>
+                                <small>
+                                  {evidence.organization}
+                                </small>
+
+                                <strong>
+                                  {evidence.title}
+                                </strong>
+                              </div>
+                            </a>
+                          )
+                        )}
+
+                      </div>
+
+                    </details>
+                  )}
+
+                </div>
+
+              </article>
+            )
+          )}
+
+        </div>
+
       </section>
 
-      <section className="rag-section">
-        <div className="section-heading"><div><div className="section-kicker">05 · RAG LAYER</div><h2>Retrieved scientific evidence</h2></div><span className="graph-badge">Local knowledge base</span></div>
-        <div className="source-grid">{result.retrieved_evidence?.map(e => <EvidenceCard evidence={e} key={e.source_url} />)}</div>
-      </section>
-    </div>
+      {result.retrieved_evidence?.length > 0 && (
+        <section className="analysis-section">
+
+          <div className="section-kicker">
+            RAG LAYER
+          </div>
+
+          <div className="section-heading">
+            <div>
+              <h3>
+                Retrieved scientific evidence
+              </h3>
+
+              <p className="section-note">
+                Documents retrieved from the local
+                environmental knowledge base.
+              </p>
+            </div>
+
+            <span className="section-count">
+              {result.retrieved_evidence.length} sources
+            </span>
+          </div>
+
+          <div className="source-list">
+
+            {result.retrieved_evidence.map(
+              evidence => (
+                <a
+                  className="source"
+                  href={evidence.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  key={evidence.source_url}
+                >
+
+                  <div className="source-top">
+                    <span>
+                      {evidence.organization}
+                    </span>
+
+                    <span>
+                      {evidence.relevance}
+                    </span>
+                  </div>
+
+                  <strong>
+                    {evidence.title}
+                  </strong>
+
+                  <p>
+                    {evidence.excerpt}
+                  </p>
+
+                </a>
+              )
+            )}
+
+          </div>
+
+        </section>
+      )}
+    </>
   );
 }
+
+/* =========================================================
+   APPLICATION
+   ========================================================= */
 
 function App() {
   const [mode, setMode] = useState("chat");
   const [text, setText] = useState("");
-  const [input, setInput] = useState(JSON.stringify(example, null, 2));
-  const [messages, setMessages] = useState([{ role: "assistant", content: "Tell me what is happening on the land. I’ll ask for missing environmental context before making a recommendation." }]);
-  const [conversationId, setConversationId] = useState(null);
+  const [input, setInput] = useState(
+    JSON.stringify(example, null, 2)
+  );
+
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content:
+        "Tell me what is happening on the land. I’ll ask for missing environmental context before making a recommendation."
+    }
+  ]);
+
+  const [conversationId, setConversationId] =
+    useState(null);
+
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const contextCount = useMemo(() => result?.environmental_state ? Object.keys(result.environmental_state).length : 0, [result]);
-
   async function sendChat(customText) {
     const message = (customText ?? text).trim();
+
     if (!message || loading) return;
-    setLoading(true); setError(""); setMessages(prev => [...prev, { role: "user", content: message }]); setText("");
+
+    setLoading(true);
+    setError("");
+
+    setMessages(prev => [
+      ...prev,
+      {
+        role: "user",
+        content: message
+      }
+    ]);
+
+    setText("");
+
     try {
-      const res = await fetch(`${API}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation_id: conversationId, message }) });
-      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const res = await fetch(`${API}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          message
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          `API returned ${res.status}`
+        );
+      }
+
       const data = await res.json();
-      setConversationId(data.conversation_id); setMessages(prev => [...prev, { role: "assistant", content: data.message }]);
-      setResult(data.analysis || { needs_clarification: true, summary: data.message, clarification_questions: data.clarification_questions || [] });
-    } catch (e) { setError(e.message); } finally { setLoading(false); }
+
+      setConversationId(
+        data.conversation_id
+      );
+
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.message,
+          analysis: data.analysis || null
+        }
+      ]);
+
+      if (data.analysis) {
+        setResult(data.analysis);
+      } else {
+        setResult({
+          needs_clarification: true,
+          summary: data.message,
+          clarification_questions:
+            data.clarification_questions || []
+        });
+      }
+
+    } catch (e) {
+      setError(
+        e.message ||
+        "Unable to connect to the environmental intelligence service."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function analyzeJSON() {
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
+
     try {
       const payload = JSON.parse(input);
-      const res = await fetch(`${API}/api/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error(`API returned ${res.status}`);
-      setResult(await res.json());
-    } catch (e) { setError(e.message); } finally { setLoading(false); }
-  }
 
-  function loadDemoChat() { setText("Biodiversity is declining on my semi-arid farm. I grow monoculture wheat."); }
-  function runFullDemo() {
-    setMode("chat");
-    setMessages([{ role: "assistant", content: "Tell me what is happening on the land. I’ll ask for missing environmental context before making a recommendation." }]);
-    setConversationId(null); setResult(null); setText("Biodiversity is declining on my semi-arid farm. I grow monoculture wheat.");
+      const res = await fetch(
+        `${API}/api/analyze`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(
+          `API returned ${res.status}`
+        );
+      }
+
+      const data = await res.json();
+
+      setResult(data);
+
+    } catch (e) {
+      setError(
+        e.message ||
+        "Invalid JSON or analysis request failed."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand"><div className="brand-mark">D</div><div><strong>DARUKAA<span>.EARTH</span></strong><small>BIODIVERSITY INTELLIGENCE</small></div></div>
-        <div className="top-status"><i /> SYSTEM ONLINE <span>·</span> LOCAL RAG</div>
+    <main className="shell">
+
+      {/* =================================================
+          HEADER
+          ================================================= */}
+
+      <header className="hero">
+
+        <div className="hero-top">
+
+          <div className="eyebrow">
+            DARUKAA.EARTH
+            <span>•</span>
+            AI ENVIRONMENTAL SCIENTIST
+          </div>
+
+          <div className="system-status">
+            <span className="status-dot"></span>
+            SYSTEM ONLINE
+          </div>
+
+        </div>
+
+        <h1>
+          Biodiversity
+          <br />
+          <em>Intelligence</em>
+        </h1>
+
+        <div className="hero-bottom">
+
+          <p>
+            Evidence-grounded reasoning across
+            soil, water, land use, climate and
+            biodiversity.
+          </p>
+
+          <div className="hero-tags">
+            <span>SOIL</span>
+            <span>WATER</span>
+            <span>LAND</span>
+            <span>BIODIVERSITY</span>
+          </div>
+
+        </div>
+
       </header>
 
-      <section className="hero">
-        <div className="hero-copy"><div className="eyebrow">AI ENVIRONMENTAL SCIENTIST</div><h1>See the ecosystem.<br/><em>Understand the interaction.</em></h1><p>Evidence-grounded environmental reasoning across soil, water, land use, climate and biodiversity.</p></div>
-        <div className="hero-orb"><div className="orb-ring ring-a"/><div className="orb-ring ring-b"/><div className="orb-core"><span>◎</span><small>ENVIRONMENT<br/>MODEL</small></div></div>
-      </section>
+      {/* =================================================
+          MAIN GRID
+          ================================================= */}
 
-      <section className="workspace">
-        <aside className="input-panel">
-          <div className="input-head"><div><span className="section-kicker">INPUT LAYER</span><h2>Ask Darukaa</h2></div><span className="api-dot">API</span></div>
-          <div className="tabs"><button className={mode === "chat" ? "active" : ""} onClick={() => setMode("chat")}>Conversation</button><button className={mode === "json" ? "active" : ""} onClick={() => setMode("json")}>Structured JSON</button></div>
-          {mode === "chat" ? <>
-            <div className="chat">{messages.map((m, i) => <div className={`bubble ${m.role}`} key={i}><span>{m.role === "assistant" ? "DARUKAA AI" : "YOU"}</span><p>{m.content}</p></div>)}</div>
-            <textarea className="composer-input" value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} placeholder="Describe what is happening on your land…" />
-            <button className="primary" onClick={() => sendChat()} disabled={loading}>{loading ? <><i className="spinner"/> Analyzing…</> : <>Run analysis <span>↗</span></>}</button>
-            <button className="demo-link" onClick={loadDemoChat}>Load first demo message</button>
-          </> : <>
-            <textarea className="json-input" value={input} onChange={e => setInput(e.target.value)} />
-            <button className="primary" onClick={analyzeJSON} disabled={loading}>{loading ? "Reasoning…" : <>Analyze ecosystem <span>↗</span></>}</button>
-            <button className="demo-link" onClick={() => setInput(JSON.stringify(example, null, 2))}>Reset demo data</button>
-          </>}
-          {error && <div className="error">{error}</div>}
-          <div className="input-footer"><span>● FASTAPI</span><span>● RAG</span><span>● REASONING</span></div>
-        </aside>
+      <section className="grid">
 
-        <div className="results-panel">
-          <div className="results-top"><span>ANALYSIS OUTPUT</span>{result && <span>{contextCount} environmental signals retained</span>}</div>
-          <Analysis result={result} />
+        {/* =================================================
+            INPUT PANEL
+            ================================================= */}
+
+        <div className="panel input-panel">
+
+          <div className="panel-label">
+            INPUT LAYER
+            <span>
+              {mode === "chat"
+                ? "CONVERSATIONAL"
+                : "STRUCTURED"}
+            </span>
+          </div>
+
+          <div className="tabs">
+
+            <button
+              className={
+                mode === "chat"
+                  ? "active"
+                  : ""
+              }
+              onClick={() => setMode("chat")}
+            >
+              Conversation
+            </button>
+
+            <button
+              className={
+                mode === "json"
+                  ? "active"
+                  : ""
+              }
+              onClick={() => setMode("json")}
+            >
+              Structured JSON
+            </button>
+
+          </div>
+
+          {mode === "chat" ? (
+            <>
+
+              <div className="panel-head">
+
+                <div>
+                  <div className="mini-label">
+                    CONVERSATIONAL INTELLIGENCE
+                  </div>
+
+                  <h2>
+                    Ask the environmental scientist
+                  </h2>
+                </div>
+
+                <div className="memory-badge">
+                  MEMORY
+                </div>
+
+              </div>
+
+              <div className="chat">
+
+                {messages.map((message, index) => (
+                  <div
+                    className={`bubble ${message.role}`}
+                    key={index}
+                  >
+
+                    <div className="bubble-header">
+
+                      <span>
+                        {message.role ===
+                        "assistant"
+                          ? "DARUKAA AI"
+                          : "YOU"}
+                      </span>
+
+                      {message.role ===
+                        "assistant" &&
+                        message.analysis && (
+                          <small>
+                            GROUNDED
+                          </small>
+                        )}
+
+                    </div>
+
+                    <p>
+                      {message.content}
+                    </p>
+
+                    {message.role ===
+                      "assistant" &&
+                      message.analysis && (
+                        <ChatAnalysis
+                          analysis={message.analysis}
+                        />
+                      )}
+
+                  </div>
+                ))}
+
+                {loading && (
+                  <div className="bubble assistant thinking">
+
+                    <div className="bubble-header">
+                      <span>
+                        DARUKAA AI
+                      </span>
+                    </div>
+
+                    <div className="thinking-row">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                      <em>
+                        Connecting environmental signals…
+                      </em>
+                    </div>
+
+                  </div>
+                )}
+
+              </div>
+
+              <div className="composer">
+
+                <div className="composer-label">
+                  <span>
+                    ENVIRONMENTAL QUERY
+                  </span>
+
+                  <span>
+                    ENTER TO ANALYZE
+                  </span>
+                </div>
+
+                <textarea
+                  value={text}
+                  onChange={e =>
+                    setText(e.target.value)
+                  }
+                  onKeyDown={e => {
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey
+                    ) {
+                      e.preventDefault();
+                      sendChat();
+                    }
+                  }}
+                  placeholder="Describe what is happening on your land…"
+                />
+
+                <button
+                  className="primary"
+                  onClick={() => sendChat()}
+                  disabled={
+                    loading ||
+                    !text.trim()
+                  }
+                >
+                  <span>
+                    {loading
+                      ? "Analyzing environment…"
+                      : "Run analysis"}
+                  </span>
+
+                  {!loading && (
+                    <span className="button-arrow">
+                      ↗
+                    </span>
+                  )}
+                </button>
+
+                <div className="composer-hint">
+                  <span>
+                    Shift + Enter for a new line
+                  </span>
+
+                  <span>
+                    {text.length} characters
+                  </span>
+                </div>
+
+              </div>
+
+            </>
+          ) : (
+            <>
+
+              <div className="panel-head">
+
+                <div>
+                  <div className="mini-label">
+                    STRUCTURED INPUT
+                  </div>
+
+                  <h2>
+                    Environmental context
+                  </h2>
+                </div>
+
+                <button
+                  className="secondary-button"
+                  onClick={() =>
+                    setInput(
+                      JSON.stringify(
+                        example,
+                        null,
+                        2
+                      )
+                    )
+                  }
+                >
+                  Load demo
+                </button>
+
+              </div>
+
+              <textarea
+                className="json-editor"
+                value={input}
+                onChange={e =>
+                  setInput(e.target.value)
+                }
+              />
+
+              <button
+                className="primary"
+                onClick={analyzeJSON}
+                disabled={loading}
+              >
+                <span>
+                  {loading
+                    ? "Reasoning…"
+                    : "Analyze ecosystem"}
+                </span>
+
+                {!loading && (
+                  <span className="button-arrow">
+                    ↗
+                  </span>
+                )}
+              </button>
+
+              <div className="json-note">
+                Accepts environmental variables
+                including soil, rainfall, land use,
+                biodiversity and human impact.
+              </div>
+
+            </>
+          )}
+
+          {error && (
+            <div className="error">
+
+              <strong>
+                Connection error
+              </strong>
+
+              <span>
+                {error}
+              </span>
+
+            </div>
+          )}
+
+          <div className="panel-footer">
+
+            <span>
+              <i></i>
+              FASTAPI
+            </span>
+
+            <span>
+              <i></i>
+              RAG
+            </span>
+
+            <span>
+              <i></i>
+              REASONING
+            </span>
+
+            <span>
+              <i></i>
+              MEMORY
+            </span>
+
+          </div>
+
         </div>
+
+        {/* =================================================
+            RESULTS PANEL
+            ================================================= */}
+
+        <div className="panel results">
+
+          <div className="results-header">
+
+            <div>
+              <div className="panel-label">
+                ANALYSIS OUTPUT
+              </div>
+
+              <h2>
+                Environmental intelligence
+              </h2>
+            </div>
+
+            {result &&
+              !result.needs_clarification && (
+                <div className="result-live">
+                  <span></span>
+                  ANALYSIS COMPLETE
+                </div>
+              )}
+
+          </div>
+
+          {!result && (
+            <div className="empty">
+
+              <div className="empty-orbit">
+                ◈
+              </div>
+
+              <div className="empty-kicker">
+                AWAITING ENVIRONMENTAL INPUT
+              </div>
+
+              <h3>
+                See the ecosystem.
+                <br />
+                Understand the interaction.
+              </h3>
+
+              <p>
+                Start a conversation or submit
+                structured environmental data to
+                generate evidence-backed ecological
+                recommendations.
+              </p>
+
+              <div className="empty-flow">
+                <span>INPUT</span>
+                <b>→</b>
+                <span>RETRIEVE</span>
+                <b>→</b>
+                <span>REASON</span>
+                <b>→</b>
+                <span>ACTION</span>
+              </div>
+
+            </div>
+          )}
+
+          <Analysis
+            result={result}
+          />
+
+        </div>
+
       </section>
 
-      <footer><span>DARUKAA.EARTH</span><span>ENVIRONMENTAL INTELLIGENCE · RAG · MULTI-METRIC REASONING</span><button onClick={runFullDemo}>Reset demo</button></footer>
+      {/* =================================================
+          FOOTER
+          ================================================= */}
+
+      <footer>
+
+        <span>
+          DARUKAA.EARTH
+        </span>
+
+        <span>
+          AI BIODIVERSITY INTELLIGENCE
+        </span>
+
+        <span>
+          EVIDENCE • REASONING • ACTION
+        </span>
+
+      </footer>
+
     </main>
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(
+  document.getElementById("root")
+).render(<App />);

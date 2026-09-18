@@ -23,7 +23,7 @@ class EnvironmentalInput(BaseModel):
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     message: str = Field(min_length=1)
-    environmental_context: Dict[str, Any] = {}
+    environmental_context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class Evidence(BaseModel):
@@ -54,11 +54,11 @@ class Recommendation(BaseModel):
 class AnalysisResponse(BaseModel):
     status: str
     needs_clarification: bool
-    clarification_questions: List[str] = []
+    clarification_questions: List[str] = Field(default_factory=list)
     summary: str
     environmental_state: Dict[str, Any]
     reasoning_trace: List[str]
-    interaction_graph: List[Interaction] = []
+    interaction_graph: List[Interaction] = Field(default_factory=list)
     recommendations: List[Recommendation]
     retrieved_evidence: List[Evidence]
 
@@ -68,5 +68,5 @@ class ChatResponse(BaseModel):
     message: str
     extracted_context: Dict[str, Any]
     needs_clarification: bool
-    clarification_questions: List[str] = []
+    reasoning_chain: List[str] = Field(default_factory=list)
     analysis: Optional[AnalysisResponse] = None
